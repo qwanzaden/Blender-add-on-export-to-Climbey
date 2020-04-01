@@ -1,9 +1,9 @@
 bl_info = {
     "name": "Export Climbey custom level",
     "category": "Import-Export",
-    "author": "Chris Pratt",
-    "version": (1, 0, 0),
-    "blender": (2, 79, 0),
+    "author": "Chris Pratt, upgraded by UniqueName",
+    "version": (1, 1, 0),
+    "blender": (2, 80, 0),
     "location": "File > Export > Climbey custom level",
     "description": "Export current scene to a Climbey custom level",
     "warning": "",
@@ -387,8 +387,6 @@ def set_material_color():
                 cur_object.data.materials[material_name].diffuse_color[1] = set_color[1]
                 cur_object.data.materials[material_name].diffuse_color[2] = set_color[2]
                 cur_object.show_transparent = True
-                cur_object.data.materials[material_name].use_transparency = True
-                cur_object.data.materials[material_name].alpha = set_alpha
 
 #==============================================================================
 # Blender Operator class
@@ -400,7 +398,7 @@ class EXPORT_TO_Climbey(bpy.types.Operator):
     bl_label = 'Export scene as Climbey txt'
     bl_options = {'REGISTER'}
 
-    filepath = bpy.props.StringProperty(subtype="FILE_PATH")
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH")
 
     # invoke is called when the user picks the Export menu entry.
     def invoke(self, context, event):
@@ -429,11 +427,11 @@ def menu_func(self, context):
 
 def register():
     bpy.utils.register_class(EXPORT_TO_Climbey)
-    bpy.types.INFO_MT_file_export.append(menu_func)
+    bpy.types.TOPBAR_MT_file_export.append(menu_func)
 
 def unregister():
     bpy.utils.unregister_class(EXPORT_TO_Climbey)
-    bpy.types.INFO_MT_file_export.remove(menu_func)
+    bpy.types.TOPBAR_MT_file_export.remove(menu_func)
 
 if __name__ == '__main__':
     register()
