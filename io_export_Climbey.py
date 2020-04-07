@@ -2,7 +2,7 @@ bl_info = {
     "name": "Export Climbey custom level",
     "category": "Import-Export",
     "author": "Chris Pratt, upgraded by UniqueName",
-    "version": (1, 2, 0),
+    "version": (1, 2, 1),
     "blender": (2, 80, 0),
     "location": "File > Export > Climbey custom level",
     "description": "Export current scene to a Climbey custom level",
