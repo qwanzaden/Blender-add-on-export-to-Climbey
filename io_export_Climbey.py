@@ -33,8 +33,8 @@ def get_all_objects_instances(collection, matrix, climbey_types, level_dic):
         if obj.instance_type == 'COLLECTION':
             # Run through all sub-instances of the instance
             sub_collection = obj.instance_collection
-            get_all_objects_instances(sub_collection, mat, climbey_types, level_dic)
-
+            if sub_collection is not None:
+                get_all_objects_instances(sub_collection, mat, climbey_types, level_dic)            
 
 
 def make_level(file_handle):
