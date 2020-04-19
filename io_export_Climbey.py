@@ -1,9 +1,9 @@
 bl_info = {
     "name": "Export Climbey custom level",
     "category": "Import-Export",
-    "author": "Chris Pratt",
-    "version": (1, 0, 0),
-    "blender": (2, 79, 0),
+    "author": "Chris Pratt, upgraded by UniqueName",
+    "version": (1, 2, 1),
+    "blender": (2, 80, 0),
     "location": "File > Export > Climbey custom level",
     "description": "Export current scene to a Climbey custom level",
     "warning": "",
@@ -13,6 +13,29 @@ import bpy
 import os
 import mathutils
 import math
+
+def get_all_objects_instances(collection, matrix, climbey_types, level_dic):
+    """Runs recursivly through all objects in a scene and creates all instances in the global coordinate system"""
+    
+    for obj in collection.all_objects:
+        
+        # Translate local coordinates of the instance into the global coordinate system
+        mat = matrix @ obj.matrix_world
+
+        if 'type' in obj.keys():
+            # If the current object has a 'type' custom object property retrieve it
+            cur_type = obj['type'].lower()
+
+            if callable(getattr(climbey_types, cur_type, None)):
+                # If there is a matching function to the objects type call it
+                getattr(climbey_types, cur_type)(level_dic, obj, mat, 0)
+
+        if obj.instance_type == 'COLLECTION':
+            # Run through all sub-instances of the instance
+            sub_collection = obj.instance_collection
+            if sub_collection is not None:
+                get_all_objects_instances(sub_collection, mat, climbey_types, level_dic)            
+
 
 def make_level(file_handle):
     """Turn the active blender scene into a Climbey custom level
@@ -27,18 +50,12 @@ def make_level(file_handle):
     level_dic['LevelSettings'] = {}
     level_dic['MovingArray'] = []
     level_dic['SignsArray'] = []
-    cur_types = make_level_types(level_dic)
+    climbey_types = make_level_types(level_dic)
 
-    for itt_object, cur_object in enumerate(bpy.context.scene.objects):
-        #Loop through all objects in the currect blender project
-        
-        if 'type' in cur_object.keys():
-            #If the current object has a 'type' custom object property retrieve it
-            cur_type = cur_object['type'].lower()
-
-            if callable(getattr(cur_types, cur_type, None)):
-                #If there is a matching function to the objects type call it
-                getattr(cur_types, cur_type)(level_dic, cur_object, itt_object)
+    for scene in bpy.data.scenes:
+        collection = scene.collection
+        mat = mathutils.Matrix.Translation((0.0, 0.0, 0.0))
+        get_all_objects_instances(collection, mat, climbey_types, level_dic)
 
     #Save the created level dictionary to a file.
     file_string = str(level_dic)
@@ -53,28 +70,28 @@ class make_level_types():
     def __init__(self, level_dic):
         self.level_dic = level_dic
 
-    def add_position(self, cur_object, dic):
+    def add_position(self, location, dic):
         """add the position data from 'cur_object' into 'dic'. Blender uses the z-axis as up while climbey uses the y-axes as up"""
         dic['Position'] = {}
-        dic['Position']['x'] = cur_object.location[0]
-        dic['Position']['y'] = cur_object.location[2]
-        dic['Position']['z'] = cur_object.location[1]
+        dic['Position']['x'] = location[0]
+        dic['Position']['y'] = location[2]
+        dic['Position']['z'] = location[1]
 
-    def add_rotation(self, cur_object, dic):
+    def add_rotation(self, rotation_quaternion, dic):
         """add the rotation data from 'cur_object' into 'dic'. Blender uses the z-axis as up while climbey uses the y-axes as up"""
-        cur_object.rotation_mode = 'QUATERNION'
+        # cur_object.rotation_mode = 'QUATERNION'
         dic['Rotation'] = {}
-        dic['Rotation']['w'] = cur_object.rotation_quaternion[0]
-        dic['Rotation']['x'] = -cur_object.rotation_quaternion[1]
-        dic['Rotation']['y'] = -cur_object.rotation_quaternion[3]
-        dic['Rotation']['z'] = -cur_object.rotation_quaternion[2]
+        dic['Rotation']['w'] = rotation_quaternion[0]
+        dic['Rotation']['x'] = -rotation_quaternion[1]
+        dic['Rotation']['y'] = -rotation_quaternion[3]
+        dic['Rotation']['z'] = -rotation_quaternion[2]
 
-    def add_size(self, cur_object, dic):
+    def add_size(self, scale, dic):
         """add the size data from 'cur_object' into 'dic'. Blender uses the z-axis as up while climbey uses the y-axes as up"""
         dic['Size'] = {}
-        dic['Size']['x'] = cur_object.scale[0]
-        dic['Size']['y'] = cur_object.scale[2]
-        dic['Size']['z'] = cur_object.scale[1]
+        dic['Size']['x'] = scale[0]
+        dic['Size']['y'] = scale[2]
+        dic['Size']['z'] = scale[1]
 
     def add_RGB(self, cur_object, dic):
         """add the color data from the first material of 'cur_object' into 'dic'."""
@@ -89,20 +106,23 @@ class make_level_types():
         dic['LockY'] = lock
         dic['LockZ'] = lock
 
-    def add_all_position(self, cur_object, dic):
+    def add_all_position(self, cur_object, matrix, dic):
         """add all the positional data of 'cur_object' into 'dic'."""
-        self.add_position(cur_object, dic)
-        self.add_rotation(cur_object, dic)
-        self.add_size(cur_object, dic)
+
+        translation, rotation, scale = matrix.decompose()
+        self.add_position(translation, dic)
+        self.add_rotation(rotation, dic)
+        self.add_size(scale, dic)
         self.add_lock_xyz(cur_object, dic, False)
 
-    def add_object(self, level_dic, cur_object, material_to_type):
+    def add_object(self, level_dic, cur_object, matrix, material_to_type):
         """Add the 'cur_object' to 'level_dic' based on the names in 'material_to_type'"""
         new_dic = {}
-        self.add_position(cur_object, new_dic)
-        self.add_rotation(cur_object, new_dic)
-        self.add_size(cur_object, new_dic)
-        self.add_lock_xyz(cur_object, new_dic, False)
+        self.add_all_position(cur_object, matrix, new_dic)
+        # self.add_position(cur_object, new_dic)
+        # self.add_rotation(cur_object, new_dic)
+        # self.add_size(cur_object, new_dic)
+        # self.add_lock_xyz(cur_object, new_dic, False)
         new_material = None
 
         if 'material' in cur_object.keys():
@@ -126,93 +146,98 @@ class make_level_types():
             #Add the object
             level_dic['LevelArray'].append(new_dic)
 
-    def cube(self, level_dic, cur_object, itt_object):
+    def cube(self, level_dic, cur_object, matrix, itt_object):
         """create a cube shape with the data from cur_object and add it to level_dic"""
         material_to_type = {'grabbable': 'Grabbable', 'metal': 'Metal', 'glass': 'Glass', 'ice': 'Icy', 'light': 'Lamp', 'gravity_field': 'GravityField'}
-        self.add_object(level_dic, cur_object, material_to_type)
+        self.add_object(level_dic, cur_object, matrix, material_to_type)
 
-    def sphere(self, level_dic, cur_object, itt_object):
+    def sphere(self, level_dic, cur_object, matrix, itt_object):
         material_to_type = {'grabbable': 'SphereGrip', 'metal': 'SphereNoGrip', 'glass': 'SphereSeeThrough', 'ice': 'SphereIce', 'light': 'SphereLight'}
-        self.add_object(level_dic, cur_object, material_to_type)
+        self.add_object(level_dic, cur_object, matrix, material_to_type)
 
-    def half_sphere(self, level_dic, cur_object, itt_object):
+    def half_sphere(self, level_dic, cur_object, matrix, itt_object):
         material_to_type = {'grabbable': 'HemiGrip', 'metal': 'HemiNoGrip', 'glass': 'HemiSeeThrough', 'ice': 'HemiIce', 'light': 'HemiLight'}
-        self.add_object(level_dic, cur_object, material_to_type)
+        self.add_object(level_dic, cur_object, matrix, material_to_type)
     
-    def pipe(self, level_dic, cur_object, itt_object):
+    def pipe(self, level_dic, cur_object, matrix, itt_object):
         material_to_type = {'grabbable': 'PipeGrip', 'metal': 'PipeNoGrip', 'glass': 'PipeSeeThrough', 'ice': 'PipeIce', 'light': 'PipeLight'}
-        self.add_object(level_dic, cur_object, material_to_type)
+        self.add_object(level_dic, cur_object, matrix, material_to_type)
     
-    def pyramid(self, level_dic, cur_object, itt_object):
+    def pyramid(self, level_dic, cur_object, matrix, itt_object):
         material_to_type = {'grabbable': 'PyramidGrip', 'metal': 'PyramidNoGrip', 'glass': 'PyramidSeeThrough', 'ice': 'PyramidIce', 'light': 'PyramidLight'}
-        self.add_object(level_dic, cur_object, material_to_type)
+        self.add_object(level_dic, cur_object, matrix, material_to_type)
     
-    def prism(self, level_dic, cur_object, itt_object):
+    def prism(self, level_dic, cur_object, matrix, itt_object):
         material_to_type = {'grabbable': 'PrismGrip', 'metal': 'PrismNoGrip', 'glass': 'PrismSeeThrough', 'ice': 'PrismIce', 'light': 'PrismLight'}
-        self.add_object(level_dic, cur_object, material_to_type)
+        self.add_object(level_dic, cur_object, matrix, material_to_type)
     
-    def half_pipe(self, level_dic, cur_object, itt_object):
+    def half_pipe(self, level_dic, cur_object, matrix, itt_object):
         material_to_type = {'grabbable': 'HalfPipeGrip', 'metal': 'HalfPipeNoGrip', 'glass': 'HalfPipeSeeThrough', 'ice': 'HalfPipeIce', 'light': 'HalfPipeLight'}
-        self.add_object(level_dic, cur_object, material_to_type)
+        self.add_object(level_dic, cur_object, matrix, material_to_type)
 
-    def sign(self, level_dic, cur_object, itt_object):
+    def sign(self, level_dic, cur_object, matrix, itt_object):
         new_dic = {}
-        self.add_position(cur_object, new_dic)
-        self.add_rotation(cur_object, new_dic)
-        self.add_size(cur_object, new_dic)
-        self.add_lock_xyz(cur_object, new_dic, False)
+        self.add_all_position(cur_object, matrix, new_dic)
+        # self.add_position(cur_object, new_dic)
+        # self.add_rotation(cur_object, new_dic)
+        # self.add_size(cur_object, new_dic)
+        # self.add_lock_xyz(cur_object, new_dic, False)
         new_dic['Invisible'] = False
         new_dic['text'] = cur_object['text']
         new_dic['Type'] = 'Sign'
         level_dic['SignsArray'].append(new_dic)
 
-    def gravity_anti(self, level_dic, cur_object, itt_object):
+    def gravity_anti(self, level_dic, cur_object, matrix, itt_object):
         new_dic = {}
-        self.add_all_position(cur_object, new_dic)
+        self.add_all_position(cur_object, matrix, new_dic)
         new_dic['Type'] = 'GravityField'
         level_dic['LevelArray'].append(new_dic)
 
-    def gravity_directional(self, level_dic, cur_object, itt_object):
+    def gravity_directional(self, level_dic, cur_object, matrix, itt_object):
         new_dic = {}
-        self.add_all_position(cur_object, new_dic)
+        self.add_all_position(cur_object, matrix, new_dic)
         new_dic['Type'] = 'GravityFieldLocal'
         level_dic['LevelArray'].append(new_dic)
 
-    def gravity_up(self, level_dic, cur_object, itt_object):
+    def gravity_up(self, level_dic, cur_object, matrix, itt_object):
         new_dic = {}
-        self.add_all_position(cur_object, new_dic)
+        self.add_all_position(cur_object, matrix, new_dic)
         new_dic['Type'] = 'GravityFieldUpward'
         level_dic['LevelArray'].append(new_dic)
 
-    def gravity_down(self, level_dic, cur_object, itt_object):
+    def gravity_down(self, level_dic, cur_object, matrix, itt_object):
         new_dic = {}
-        self.add_all_position(cur_object, new_dic)
+        self.add_all_position(cur_object, matrix, new_dic)
         new_dic['Type'] = 'GravityFieldDownward'
         level_dic['LevelArray'].append(new_dic)
 
-    def lava(self, level_dic, cur_object, itt_object):
+    def lava(self, level_dic, cur_object, matrix, itt_object):
         new_dic = {}
-        self.add_all_position(cur_object, new_dic)
+        self.add_all_position(cur_object, matrix, new_dic)
         new_dic['Type'] = 'Lava'
         level_dic['LevelArray'].append(new_dic)
 
-    def spikes(self, level_dic, cur_object, itt_object):
+    def spikes(self, level_dic, cur_object, matrix, itt_object):
         new_dic = {}
-        self.add_all_position(cur_object, new_dic)
+        self.add_all_position(cur_object, matrix, new_dic)
         new_dic['Size']['y'] = 1.0
         new_dic['Type'] = 'Spikes'
         level_dic['LevelArray'].append(new_dic)
 
-    def trampoline(self, level_dic, cur_object, itt_object):
+    def trampoline(self, level_dic, cur_object, matrix, itt_object):
         new_dic = {}
-        self.add_all_position(cur_object, new_dic)
+        self.add_all_position(cur_object, matrix, new_dic)
         new_dic['Type'] = 'Jumpy'
         level_dic['LevelArray'].append(new_dic)
 
-    def player_start(self, level_dic, cur_object, itt_object):
+    def player_start(self, level_dic, cur_object, matrix, itt_object):
         """Add the camera rig (where the character spawns) to 'level_dic'"""
         new_dic = {}
-        self.add_position(cur_object, new_dic)
+
+        translation, rotation, scale = matrix.decompose()
+        self.add_position(translation, new_dic)
+
+        # self.add_position(cur_object, new_dic)
         self.add_lock_xyz(cur_object, new_dic, False)
         #(2018-1-31) I dont think you are supposed to set either the camera rigs rotation or scale, so those are hard coded.
         new_dic['Rotation'] = {}
@@ -227,10 +252,14 @@ class make_level_types():
         new_dic['Type'] = '[CameraRig]'
         level_dic['LevelArray'].append(new_dic)
 
-    def finishline(self, level_dic, cur_object, itt_object):
+    def finishline(self, level_dic, cur_object, matrix, itt_object):
         """Add the finish line to 'level_dic'"""
         new_dic = {}
-        self.add_position(cur_object, new_dic)
+
+        translation, rotation, scale = matrix.decompose()
+        self.add_position(translation, new_dic)
+
+        # self.add_position(cur_object, new_dic)
         self.add_lock_xyz(cur_object, new_dic, False)
         #(2018-1-31) I dont think you are supposed to set either the camera rigs rotation or scale, so those are hard coded.
         new_dic['Rotation'] = {}
@@ -245,10 +274,14 @@ class make_level_types():
         new_dic['Type'] = 'Finishline'
         level_dic['LevelArray'].append(new_dic)
 
-    def level_settings(self, level_dic, cur_object, itt_object):
+    def level_settings(self, level_dic, cur_object, matrix, itt_object):
         """Create the level settings object"""
         level_dic['LevelSettings'] = {}
-        self.add_position(cur_object, level_dic['LevelSettings'])
+
+        translation, rotation, scale = matrix.decompose()
+        self.add_position(translation, level_dic['LevelSettings'])
+
+        # self.add_position(cur_object, level_dic['LevelSettings'])
         self.add_lock_xyz(cur_object, level_dic['LevelSettings'], False)
         level_dic['LevelSettings']['Gamemode'] = int(cur_object['game_mode'])
         level_dic['LevelSettings']['Checkpoints'] = int(cur_object['checkpoints'])
@@ -387,8 +420,6 @@ def set_material_color():
                 cur_object.data.materials[material_name].diffuse_color[1] = set_color[1]
                 cur_object.data.materials[material_name].diffuse_color[2] = set_color[2]
                 cur_object.show_transparent = True
-                cur_object.data.materials[material_name].use_transparency = True
-                cur_object.data.materials[material_name].alpha = set_alpha
 
 #==============================================================================
 # Blender Operator class
@@ -400,7 +431,7 @@ class EXPORT_TO_Climbey(bpy.types.Operator):
     bl_label = 'Export scene as Climbey txt'
     bl_options = {'REGISTER'}
 
-    filepath = bpy.props.StringProperty(subtype="FILE_PATH")
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH")
 
     # invoke is called when the user picks the Export menu entry.
     def invoke(self, context, event):
@@ -429,11 +460,11 @@ def menu_func(self, context):
 
 def register():
     bpy.utils.register_class(EXPORT_TO_Climbey)
-    bpy.types.INFO_MT_file_export.append(menu_func)
+    bpy.types.TOPBAR_MT_file_export.append(menu_func)
 
 def unregister():
     bpy.utils.unregister_class(EXPORT_TO_Climbey)
-    bpy.types.INFO_MT_file_export.remove(menu_func)
+    bpy.types.TOPBAR_MT_file_export.remove(menu_func)
 
 if __name__ == '__main__':
     register()
